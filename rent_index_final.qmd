@@ -1,0 +1,705 @@
+---
+title: "Predicting Rent using Costs of Living - Multiple Linear Regression"
+author: "Jennifer Mac"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+toc: true
+execute: 
+  warning: FALSE
+  message: FALSE
+format: 
+  html:
+    embed-resources: true
+---
+
+## Load Packages
+
+```{r}
+pacman::p_load(car, emmeans, tidyverse, knitr, leaps, janitor, corrplot, cowplot)
+```
+
+## Set Themes
+
+```{r}
+# DARK BLUE 
+inside_plot_color <- "#e9ebf5ff"
+outside_plot_color <- "#2c3151ff"
+major_grid_color <- "white"
+minor_grif_color <- "white"
+text_color <- "white"
+```
+
+```{r}
+# BLUE 
+inside_plot_color <- "#e9ebf5ff"
+outside_plot_color <- "#4b548bff"
+major_grid_color <- "white"
+minor_grif_color <- "white"
+text_color <- "white"
+```
+
+```{r}
+# white BLUE 
+inside_plot_color <- "#cde2eaff"
+outside_plot_color <- "white"
+major_grid_color <- "white"
+minor_grif_color <- "#e5f0f4ff"
+text_color <- "#2c3151ff"
+```
+
+```{r}
+# WHITE
+inside_plot_color <- "#e9ebf5ff"
+outside_plot_color <- "white"
+major_grid_color <- "white"
+minor_grif_color <- "white"
+text_color <- "#2c3151ff"
+```
+
+```{r}
+theme_color <- theme_minimal() +
+  theme(panel.background = element_rect(fill = inside_plot_color, 
+                                        colour = inside_plot_color),
+        plot.background = element_rect(fill = outside_plot_color), 
+        panel.grid.major = element_line(color = major_grid_color),
+        panel.grid.minor = element_line(color = minor_grif_color),
+        plot.title = element_text(face = "bold", 
+                                  color = text_color, 
+                                  family  = "mono"), 
+        axis.title.x = element_text(face = "bold", 
+                                    color = text_color, 
+                                  family  = "mono"), 
+        axis.title.y = element_text(face = "bold", 
+                                    color = text_color, 
+                                  family  = "mono"),
+        axis.text.x = element_text(hjust = 0, 
+                                   face = "bold", 
+                                   margin = margin(l = -50),
+                                   color = text_color, 
+                                   family  = "mono", 
+                                   size = 10), 
+        axis.text.y = element_text(face = "bold", 
+                                   color = text_color, 
+                                   family  = "mono", 
+                                   size = 10), 
+        legend.position = "none")
+```
+
+## Countries
+
+```{r}
+countries <- c("Nigeria", "Hong Kong (China)", "Singapore", "Bangladesh", 
+               "Barbados", "Kuwait", "Oman", "Saudi Arabia", "India", 
+               "Cuba", "United States")
+```
+
+## Load Data (EDA)
+
++----------------------------------------------------+
+| Variables                                          |
++----------------------------------------------------+
+| Cost of living Index (Excluding Rent)              |
++----------------------------------------------------+
+| Rent Index                                         |
++----------------------------------------------------+
+| Local Purchasing Power Index                       |
+|                                                    |
+| (5,268.57/(3,533.4+1 **bedroom outside city**))/   |
+|                                                    |
+| (5,384.49/(6,076.2+**bedroom outside city**))\*100 |
++----------------------------------------------------+
+| Food Index                                         |
+|                                                    |
+| (Grocery Index / Restaurant Index) \* 100          |
++----------------------------------------------------+
+| Relative Purchasing Power Index                    |
+|                                                    |
+| (Local Purchasing Power / (cost of living + rent)) |
++----------------------------------------------------+
+
+```{r}
+# Cost of Living Indices with 121 countries
+dat <- clean_names(read.csv("wikipedia_cost_of_living_indices3.csv"))
+dat1 <- data.frame(dat, 
+                   "food_index" = round(dat$groceries_index/dat$restaurant_price_index, 3)*100, # created due to colinearity
+                   "relative_purchasing_power_index" = round(dat$local_purchasing_power_index/(dat$rent_index), 3))
+
+# Cost of Living Indices with 404 countries
+dat_city <- clean_names(read.csv("cost_of_living_cities.csv"))
+dat_city1 <- data.frame(dat_city[, -c(4:6)], 
+                        "food_index" = round(dat_city$groceries_index/dat_city$restaurant_price_index, 3)*100, 
+                        "relative_purchasing_power_index" = round(dat_city$local_purchasing_power_index/dat_city$cost_of_living_plus_rent_index, 3)*100)
+```
+
+## Overview of Dataset - Looking for Outliers
+
+```{r, fig.width=12, fig.height=6}
+dat_clean <- dat1 |> select(-cost_of_living_plus_rent_index,
+                            -restaurant_price_index, 
+                            -groceries_index)
+summary(dat_clean)
+
+df_long <- tidyr::pivot_longer(dat_clean[, -c(1, 6)], everything())
+df_long$name <- factor(df_long$name, levels = c("rent_index", "cost_of_living_index", 
+                          "local_purchasing_power_index", "food_index"))
+
+ggplot(df_long, aes(x = name, y = value)) + geom_boxplot(color = '#4b548bff') + 
+  labs(title = "Summary Statistics", x = '') + theme_color + 
+  theme(text = element_text(size = 18), 
+        axis.text.x = element_text(face = "bold", color = text_color, family  = "mono"), 
+        axis.text.y = element_text(face = "bold", color = text_color, family  = "mono")) +
+  scale_x_discrete(labels = c('Rent','Cost of Living', 'Local Purchasing Power', 'Food'))
+
+  
+```
+
+## Creating Linear Models
+
+### Without Relative Purchasing power
+
+log(`rent_index`) = -2.096 + 1.269 log(`cost_of_living`) + 0.003 (`local_purchasing_power_index`) - 0.002 (`food_index`)
+
+```{r}
+
+# full model: all variables as predictors 
+mod_full <- lm(rent_index ~ ., dat1[, -c(1, 9)]); summary(mod_full)
+
+corrplot(cor(dat1[, -c(1, 9)])*abs(cor(dat1[, -c(1, 9)]))>0.7) # colinearity
+dat2 <- dat1[, -c(4:6)] # remove cost of living plus rent index, grocery index and restaurant index
+
+corrplot(cor(dat2[, -c(1, 6)])*abs(cor(dat2[, -c(1, 6)]))>0.7) # no colinearity
+
+# full model 2: remaining variables as predictors 
+mod_full2 <- lm(rent_index ~ ., dat2[, -c(1, 6)]); summary(mod_full2)
+par(mfrow = c(1, 2)); plot(mod_full2, 1:2)
+
+#transform cost of living, local purchasing poer, and relative purchasing power
+summary(powerTransform(cbind(cost_of_living_index, 
+                             local_purchasing_power_index,
+                             food_index)~1, dat1))
+
+summary(powerTransform(cbind(cost_of_living_index, 
+                             local_purchasing_power_index,
+                             food_index)~1, dat1))
+
+# AIC: backward and both are the same result
+summary(step(mod_full2, direction = "forward"))
+
+mod1 <- lm(log(rent_index) ~ log(cost_of_living_index) + 
+             local_purchasing_power_index + 
+             food_index, dat1)
+par(mfrow = c(1, 2)); plot(mod1, 1:2); summary(mod1) # R^2 = 0.7722
+```
+
+```{r}
+dat1$label_c <- ifelse(dat1$country %in% countries, dat1$country, '')
+dat1$color_yn <- ifelse(dat1$country %in% countries, 'yes', 'no')
+dat1$residuals <- residuals(mod1)
+dat1$fitted_values <- fitted(mod1)
+
+no_color <- "#9fa5c8ff"
+yes_color <- "#2c3151ff"
+inside_text_color <- "#2c3151ff"
+
+fr <- ggplot(dat1, aes(x = fitted_values, y = residuals, label = label_c)) +
+  geom_point(aes(color = color_yn)) +
+  scale_color_manual(values = c("no" = no_color,
+                                "yes" = yes_color)) +
+  geom_text(nudge_y = -1, color = inside_text_color, fontface = 2, size = 2.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", scolor = inside_text_color) +
+      labs(title = "Residuals vs Fitted Values",
+           x = "Fitted Values",
+           y = "Residuals") + theme_color 
+
+
+qq <- ggplot(dat1, aes(sample = log(local_purchasing_power_index), label = label_c)) +
+  stat_qq(geom = "point", color = ifelse(dat1$color_yn == "no", 
+                                         no_color, inside_text_color)) +
+  stat_qq_line(linetype = "dashed", color = inside_text_color) +
+  labs(title = "Q-Q Residuals",
+           x = "Standardized Residuals",
+           y = "Theoretical Quantiles") + theme_color
+
+p <- plot_grid(fr, qq);p
+ggsave("plot.png", p, width = 7, height = 5)
+```
+
+```{r, fig.width=10, fig.height=8.2}
+options(scipen = 999)
+
+pred_rent_country <- data.frame(
+  'country' = dat1$country,
+  'pred' = predict(mod1), 
+  'rent' = log(dat1$rent_index)
+  ) |>
+  mutate(error = round((pred/rent)-1, 6))
+ 
+by_error <- pred_rent_country |> arrange(abs(error)) |> select(country, error) |>
+  mutate(error = case_when(abs(error) < 0.00001 ~ error,
+                           abs(error) > 0.00001 ~ round(error, 4), 
+                           TRUE ~ error))
+
+by_error |> slice(c(1:10, 112:121)) |>
+  ggplot(aes(x = reorder(country, abs(error)), y = error)) + 
+  geom_hline(yintercept = 0, color = '#4b548bff', lwd = 0) +
+  geom_col(fill = "#4b548bff", color = "#4b548bff") +
+  theme_color +
+  geom_label(aes(label = error), hjust = -0.1, angle = 90, 
+             text.color = "#4b548bff", border.color = "white", 
+             size = 5) +
+  labs(title = 'Top 10 Most and Least Expected Country Rents: Error %', 
+       x = '', y = 'Error %') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, 
+                                   face = "bold", 
+                                    color = text_color, 
+                                  family  = "mono"), 
+        axis.text.y = element_text(face = "bold", 
+                                    color = text_color, 
+                                  family  = "mono"),
+        text = element_text(size = 17)) +
+  coord_cartesian(ylim = c(NA, 1.08)) +
+  geom_vline(xintercept = 10.5, color = "#4b548bff")
+```
+
+```{r, fig.width=8, fig.height=6}
+# 84 - rent 36 - cost of living + rent
+d <- dat_clean |> select(country, relative_purchasing_power_index) |>
+  arrange(desc(relative_purchasing_power_index)) |> slice(c(1:10, 84, 112:121)) 
+
+plot_affordability <- d |>
+  ggplot(aes(x = reorder(country, -relative_purchasing_power_index), 
+             y = relative_purchasing_power_index, 
+             fill = country == "United States")) + 
+  geom_vline(xintercept = 11, color = "#4b548bff", lwd = 3) +
+  geom_hline(yintercept = 0, color = '#4b548bff', lwd = 0) +
+  geom_col(aes()) +
+  scale_fill_manual(values = c("TRUE" = "#4b548bff", "FALSE" = "#2c3151ff"),
+                    guide = "none") +
+  theme_color +
+  labs(title = 'Top 10 Most and Least Affordable Housing by Country:', 
+       x = '', y = 'Relative Purchasing Power Index') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, 
+                                   face = "bold", 
+                                    color = text_color, 
+                                  family  = "mono"), 
+        axis.text.y = element_text(face = "bold", 
+                                    color = text_color, 
+                                  family  = "mono"),
+        text = element_text(size = 15), 
+        plot.margin = margin(t = 10, r = 60));plot_affordability
+
+ggsave("plot_affordability.png", plot_affordability, width = 8.7, height = 5.5)
+```
+
+```{r, fig.width=12, fig.height=7}
+no_color <- "#8bafbcff"
+yes_color <- "#3b5a65ff"
+inside_text_color <- "#3b5a65ff"
+line_color <- "#3b5a65ff"
+
+countries <- c("Nigeria", "Hong Kong (China)", "Singapore", "Bangladesh", 
+               "Barbados", "Kuwait", "Oman", "Saudi Arabia", "India", 
+               "Cuba", "Cameroon", "United States")
+
+pred_rent_country <- data.frame(
+  'country' = dat1$country,
+  'pred' = predict(mod1), 
+  'rent' = log(dat1$rent_index)
+  ) |>
+   mutate(error = round((pred/rent)-1, 6))
+
+by_error <- pred_rent_country |> arrange(error) |> select(country, error, pred)
+which(by_error$country %in% c("Hong Kong (China)", "Singapore","United States", "India", "Cuba", "Switzerland", "Nigeria", 
+                              "Jordan", "Algeria", "Venezuela", "Pakistan", "Nepal", "Bangladesh", "Saudi Arabia", "Norway", "Denmark"))
+countries <- by_error |> slice(1, 3, 5, 36, 61:62, 82, 91, 94, 109, 116:121)
+
+
+pred_rent_country <- data.frame(
+  'country' = dat1$country,
+  'pred' = predict(mod1), 
+  'rent' = log(dat1$rent_index)
+  ) |>
+  mutate(country = ifelse(country %in% countries$country, dat1$country, NA)) |>
+  mutate(color_yn = ifelse(!is.na(country), 'yes', 'no'), 
+           alpha_yn = ifelse(!is.na(country), 1, 0.7))
+
+p <- pred_rent_country |>
+  ggplot(aes(pred, rent, label = country)) + 
+  geom_point(aes(color = color_yn), size = 3) +
+  scale_color_manual(values = c("no" = no_color,
+                                "yes" = yes_color))+
+  geom_abline(intercept = 0, slope = 1, lwd = 1.5,
+              linetype = "dashed", color = line_color)+
+  ggrepel::geom_label_repel(color = line_color,
+                            fontface = 2, family = "mono", size = 5, 
+                            label.size = 0, box.padding = 0.1, 
+                            min.segment.length = 0) +
+  labs(x = "Predicted Rent", y = "Actual Rent", 
+       title = "Predicted Rent vs Actual Rent: Countries") + 
+  theme_color +
+  theme(plot.margin = margin(t = 10, r = 50, b = 20, l = 20), 
+        text = element_text(size = 20)); p
+
+
+ggsave("p.png", p, width = 10, height = 6)
+```
+
+```{r, fig.width=10, fig.height=6.2}
+mod2_city <- lm(log(rent_index) ~ log(cost_of_living_index) + 
+           local_purchasing_power_index + food_index, dat_city1)
+
+no_color <- "#9fa5c8ff"
+yes_color <- "#2c3151ff"
+inside_text_color <- "#2c3151ff"
+line_color <- "#2c3151ff"
+
+pred_rent <- data.frame('city' = dat_city1$city,
+                        'pred' = predict(mod2_city), 
+                        'rent' = log(dat_city1$rent_index)) |>
+  mutate(error = round((pred/rent)-1, 6))
+
+by_error <- pred_rent |> arrange(error) |> select(city, error, pred)
+which(by_error$city %in% c("San Jose, CA, United States"))
+city_names <- by_error |> slice(c(46, 41, 1:3, 402:404, 26, 46, 340, 351, 364, 365, 393, 398, 400, 8,  10, 188))
+
+pred_rent <- data.frame('city' = dat_city1$city,
+                        'pred' = predict(mod2_city), 
+                        'rent' = log(dat_city1$rent_index)) |>
+  mutate(city = ifelse(city %in% city_names$city, dat_city1$city, NA)) |>
+  mutate(color_yn = ifelse(!is.na(city), 'yes', 'no'), 
+         alpha_yn = ifelse(!is.na(city), 1, 0.7))
+
+p <- pred_rent |>
+  ggplot(aes(pred, rent, label = city)) + 
+  geom_point(aes(color = color_yn), size = 3) +
+  scale_color_manual(values = c("no" = no_color,
+                                "yes" = yes_color))+
+  geom_abline(intercept = 0, slope = 1, lwd = 1.5,
+              linetype = "dashed", color = line_color)+
+  ggrepel::geom_label_repel(color = line_color,
+                            fontface = 2, family = "mono", size =3,  
+                            label.size = 0, box.padding = 0.1, 
+                            min.segment.length = 0) +
+  labs(x = "Predicted Rent", y = "Actual Rent", 
+       title = "Predicted Rent vs Actual Rent: Global Cities") + 
+  theme_color +
+  theme(plot.margin = margin(t = 10, r = 50, b = 20, l = 20), 
+        text = element_text(size = 15)); p
+
+ggsave("p.png", p, width = 8.7, height = 5.5)
+```
+
+```{r}
+
+d <- dat_city1 |> select(city, relative_purchasing_power_index) |>
+  arrange(desc(relative_purchasing_power_index))
+
+which(d$city %in% c("San Jose, CA, United States"))
+
+d <- d |> slice(c(1:5, 348, 400:404)) 
+plot_affordability <- d |>
+  ggplot(aes(x = reorder(city, -relative_purchasing_power_index), 
+             y = relative_purchasing_power_index, 
+             fill = city == "San Jose, CA, United States")) + 
+  geom_vline(xintercept = 6, color = "#4b548bff", lwd = 3) +
+  geom_hline(yintercept = 0, color = '#4b548bff', lwd = 0) +
+  geom_col(aes()) +
+  scale_fill_manual(values = c("TRUE" = "#4b548bff", "FALSE" = "#2c3151ff"),
+                    guide = "none") +
+  theme_color +
+  labs(title = 'Top 5 Most and Least Affordable Housing by Global Cities:', 
+       x = '', y = 'Relative Purchasing Power Index') +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1, 
+                                   face = "bold", 
+                                    color = text_color, 
+                                  family  = "mono"), 
+        axis.text.y = element_text(face = "bold", 
+                                    color = text_color, 
+                                  family  = "mono"),
+        text = element_text(size = 13), 
+        plot.margin = margin(l= 30,t = 10, r = 30));plot_affordability
+
+ggsave("plot_affordability.png", plot_affordability, width = 8.7, height = 5.3)
+```
+
+### SPARKLINES
+
+```{r}
+# SET UP
+countries <- c("Nigeria", "Hong Kong (China)", "Singapore", "Bangladesh", 
+               "Barbados", "Kuwait", "Oman", "Saudi Arabia", "India", 
+               "Cuba", "Cameroon", "United States", "Max", "Min")
+countries <- c("Nigeria", "Singapore", "Bangladesh", 
+               "Barbados", "Kuwait", "India", 
+               "Cuba", "United States", "Max", "Min")
+
+min <- data.frame(country = "Min", 
+                      cost_of_living_index = 18.8, 
+                      rent_index = 2.4 ,
+                      local_purchasing_power_index = 2.3,
+                      food_index = 79.7)
+max <- data.frame(country = "Max", 
+                      cost_of_living_index = 101.1, 
+                      rent_index = 67.2 ,
+                      local_purchasing_power_index = 182.5,
+                      food_index = 266.5)
+new_dat <- rbind(rbind(dat1[, -c(4:6, 9:13)], max), min)[c(1:3, 5, 4)]
+```
+
+```{r}
+new_dat <- new_dat |>
+  mutate(
+    Country = case_when(
+    country == "Nigeria" ~ "Nigeria",
+    country == "Hong Kong (China)" ~ "Hong Kong",
+    country == "Singapore" ~ "Singapore",
+    country == "Bangladesh" ~ "Bangladesh",
+    country == "Barbados" ~ "Barbados",
+    country == "Kuwait" ~ "Kuwait",
+    country == "Oman" ~ "Oman",
+    country == "Saudi Arabia" ~ "Saudi Arabia",
+    country == "India" ~ "India",
+    country == "Cuba" ~ "Cuba",
+    country == "Cameroon" ~ "Cameroon",
+    country == "United States" ~ "United States",
+    TRUE  ~ '.'),
+    alphaLevel = case_when(
+      Country != '.' ~ 1, 
+      TRUE ~ 0.1))
+
+new_dat <- new_dat |>
+  mutate(
+    Country = case_when(
+    country == "Nigeria" ~ "Nigeria",
+    country == "Singapore" ~ "Singapore",
+    country == "Bangladesh" ~ "Bangladesh",
+    country == "Barbados" ~ "Barbados",
+    country == "Kuwait" ~ "Kuwait",
+    country == "India" ~ "India",
+    country == "Cuba" ~ "Cuba",
+    country == "United States" ~ "United States",
+    TRUE  ~ '.'),
+    alphaLevel = case_when(
+      Country != '.' ~ 1, 
+      TRUE ~ 0.1))
+```
+
+```{r}
+label_food <- new_dat |>
+  mutate(side = "food_index", 
+         scaled_food = (food_index - 
+                         min(food_index)) /
+                 (max(food_index) - 
+                    min(food_index))) |>
+  filter(Country != '.') |>
+  select(Country, side, scaled_food) 
+
+new_dat <- new_dat |> filter(country %in% countries) 
+new_dat <- new_dat |> select(country, rent_index, cost_of_living_index, local_purchasing_power_index,
+                         food_index, Country, alphaLevel)
+
+color <- data.frame(color = c("#2c3151ff","#4b548bff", "#769faeff",
+                              "#cfc79dff", "#D0D4E6", "red4"))
+```
+
+```{r, fig.width=8, fig.height=4.5}
+# PLOT 
+new_dat1 <- new_dat %>%
+  arrange(Country %in% c("Bangladesh", "Singapore", "Nigeria", "United States"))
+
+my_plot <- new_dat1 |>
+  GGally::ggparcoord(columns = 2:5, 
+                     groupColumn = 6, 
+                     scale = "uniminmax", 
+                     alphaLines = 'alphaLevel',
+                     title = "INDEXES:") +
+  scale_color_manual(values = c("Bangladesh" = color[5, 1], 
+                                "Barbados" = color[5, 1],
+                                "United States" = color[6, 1],
+                                "India" = color[1, 1],
+                                "Nigeria" = color[5, 1], 
+                                "Oman" = color[5, 1], #paired2
+                                "Singapore" = color[5, 1], #paired1
+                                "Hong Kong" = color[5, 1], #paired1
+                                "Saudi Arabia" = color[5, 1], #paired2
+                                "Kuwait" = color[5, 1],
+                                "Cuba" = color[5, 1], #paired3
+                                "Cameroon" = color[5, 1], #paired3
+                                "." = NA)) +
+  geom_line(size = 1.5, lineend = "round", 
+          aes(linetype = Country, linewidth = Country)) +
+  scale_linetype_manual(values = c(
+      "United States" = "dashed",
+      "Bangladesh"    = "solid",
+      "Nigeria"       = "solid",
+      "Singapore"     = "solid",
+      "Hong Kong"     = "solid", 
+      "Barbados"      = "solid",
+      "India"         = "solid",
+      "Oman"          = "solid",
+      "Saudi Arabia"  = "solid",
+      "Kuwait"        = "solid",
+      "Cuba"          = "solid",
+      "Cameroon"      = "solid"
+    )) +
+  scale_linewidth_manual(values = c(
+      "Bangladesh"    = 1, 
+      "Barbados"      = 1,
+      "United States" = 1,
+      "India"         = 1,
+      "Nigeria"       = 1,
+      "Oman"          = 1,
+      "Singapore"     = 1,
+      "Hong Kong"     = 1,
+      "Saudi Arabia"  = 1,
+      "Kuwait"        = 1,
+      "Cuba"          = 1,
+      "Cameroon"      = 1)) +
+  labs(x = "Variables", y = "Scaled Value (0-1)") +
+  guides(alpha = "none") +
+  scale_x_discrete(labels = c('•Rent', '•Cost of Living', '•Purchasing Power', '•Food'), 
+                   expand = expansion(add = c(0.02, 0.8))) + 
+  theme_color +
+  theme(plot.margin = margin(t = 10, r = 20, b = 20, l = 15)) + 
+  geom_point(size = 2)
+
+my_plot1 <- my_plot +
+  ggrepel::geom_label_repel(data = label_food,
+                            aes(x = "food_index", 
+                                y = scaled_food,
+                                label = Country,
+                                color = Country), 
+                            inherit.aes = FALSE,
+                            hjust = "left", direction = "y", min.segment.length = 0, 
+                            size = 4, label.size = 0, nudge_x = 0.5, box.padding = 0.2, 
+                            fontface = "bold", family = "mono", xlim = 4, , seed = 27); my_plot1
+
+ggsave("my_plot.png", my_plot1, width = 8, height = 4.5)
+```
+
+WITH RELATIVE PURCHASING POWER
+
+```{r}
+# forward step with AIC (all step models are the same)
+mod3 <- lm(log(rent_index) ~ log(cost_of_living_index) + 
+             local_purchasing_power_index + 
+             relative_purchasing_power_index + 
+             food_index, dat1[, -1]); summary(mod3)
+
+# no colinearity
+corrplot(cor(dat1[, -c(1, 10:13)])*abs(cor(dat1[, -c(1, 10:13)]))>0.7)
+par(mfrow = c(1, 2)); plot(mod3, 1:2)
+
+# AIC: backward and both are the same result
+summary(step(mod3, direction = "forward"))
+
+#transform cost of living, local purchasing poer, and relative purchasing power
+summary(powerTransform(cbind(cost_of_living_index, 
+                             local_purchasing_power_index,
+                             relative_purchasing_power_index, 
+                             food_index)~1, dat1))
+
+mod4 <- lm(log(rent_index) ~ log(cost_of_living_index) + 
+             local_purchasing_power_index + 
+             log(relative_purchasing_power_index) + 
+             food_index, dat1[, -1]); summary(mod4)
+
+par(mfrow = c(1, 2)); plot(mod4, 1:2)
+```
+
+GRAPH Median income to median House sale price US
+
+```{r, fig.width=8, fig.height=4.5}
+income_housing <- left_join(read.csv("MEHOINUSA672N.csv"), read.csv("MSPUS.csv"), by = "observation_date") |>
+  rename(house_price = MEHOINUSA672N) |> rename(income = MSPUS) |>
+  mutate(observation_date = as.numeric(substr(observation_date, 1, 4))) |>
+  filter(observation_date >= 1985)|> rename(year = observation_date)
+```
+
+```{r, fig.width=10, fig.height=6.2}
+# Cost of Living Indices with 121 countries
+dat <- clean_names(read.csv("US_cities.csv"))
+dat1 <- dat |> mutate(city = str_remove(city, ", United States"), 
+                      food_index = round(groceries_index / restaurant_price_index, 3) * 100,
+                      relative_purchasing_power_index = round(local_purchasing_power_index / rent_index, 3))
+
+dat1 <- dat |> mutate(city = str_remove(city, ", United States"), 
+                      food_index = round(groceries_index / restaurant_price_index, 3) * 100,
+                      relative_purchasing_power_index = round(local_purchasing_power_index / (rent_index+cost_of_living_index), 3))
+
+mod1 <- lm(log(rent_index) ~ log(cost_of_living_index) + 
+             local_purchasing_power_index + 
+             food_index, dat1)
+
+pred_rent_country <- data.frame(
+  'city' = dat1$city,
+  'pred' = predict(mod1), 
+  'rent' = log(dat1$rent_index)
+  ) |>
+   mutate(error = round((pred/rent)-1, 6))
+
+by_error <- pred_rent_country |> arrange(error) |> select(city, error, pred) 
+which(by_error$city %in% c("New York, NY", "San Francisco, CA", "San Jose, CA", "Honolulu, HI"))
+
+norm_ab_UScity <- by_error |> slice(c(1:2, 70, 73:75, 14, 22, 31, 69))
+
+pred_rent_country <- data.frame(
+  'city' = dat1$city,
+  'pred' = predict(mod1), 
+  'rent' = log(dat1$rent_index)
+  ) |>
+  mutate(city = ifelse(city %in% norm_ab_UScity$city, 
+                          dat1$city, NA)) |>
+  mutate(color_yn = ifelse(!is.na(city), 'yes', 'no'), 
+           alpha_yn = ifelse(!is.na(city), 1, 0.7))
+
+no_color <- "#9fa5c8ff"
+yes_color <- "#2c3151ff"
+inside_text_color <- "#2c3151ff"
+line_color <- "#2c3151ff"
+
+US_city_plot <- pred_rent_country |>
+  ggplot(aes(pred, rent, label = city)) + 
+  geom_point(aes(color = color_yn), size = 3) +
+  scale_color_manual(values = c("no" = no_color,
+                                "yes" = yes_color))+
+  geom_abline(intercept = 0, slope = 1, lwd = 1.5,
+              linetype = "dashed", color = line_color)+
+  ggrepel::geom_label_repel(color = line_color,
+                            fontface = 2, family = "mono", size = 4, 
+                            label.size = 0, box.padding = 0.3, 
+                            min.segment.length = 0) +
+  labs(x = "Predicted Rent", y = "Actual Rent", 
+       title = "Predicted Rent vs Actual Rent: US Cities") + 
+  theme_color +
+  theme(plot.margin = margin(t = 10, r = 50, b = 20, l = 20), 
+        text = element_text(size = 15)); US_city_plot
+
+ggsave("US_city_plot.png", US_city_plot, width = 8.7, height = 5.5)
+```
+
+```{r}
+dat_clean <-  dat1 |> select(-cost_of_living_plus_rent_index,
+                            -restaurant_price_index, 
+                            -groceries_index)
+
+
+d <- dat_clean |> select(city, relative_purchasing_power_index) |>
+  arrange(desc(relative_purchasing_power_index)) |> slice(c(1:5, 70:75)) 
+
+plot_affordability <- d |>
+  ggplot(aes(x = reorder(city, -relative_purchasing_power_index), 
+             y = relative_purchasing_power_index, 
+             fill = city == "San Jose, CA")) + 
+  geom_vline(xintercept = 6, color = "#4b548bff", lwd = 3) +
+  geom_hline(yintercept = 0, color = '#4b548bff', lwd = 0) +
+  geom_col(aes()) +
+  scale_fill_manual(values = c("TRUE" = "#4b548bff", "FALSE" = "#2c3151ff"),
+                    guide = "none") +
+  theme_color +
+  labs(title = 'Top 5 Most and Least Affordable Housing by US Cities:', 
+       x = '', y = 'Relative Purchasing Power Index') +
+  theme(text = element_text(size = 15), 
+        plot.margin = margin(t = 10, r = 60));plot_affordability
+
+ggsave("plot_affordability.png", plot_affordability, width = 8.7, height = 5.5)
+```
