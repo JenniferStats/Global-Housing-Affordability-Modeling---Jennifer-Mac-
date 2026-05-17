@@ -1,4 +1,4 @@
-# Global Housing Affordability Analysis
+# 🌎🏠 Global Housing Affordability Analysis
 
 A statistical analysis of rental affordability across 121 countries, exploring what economic indicators actually drive rent prices — and why the U.S. is pricing people out.
 
