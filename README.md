@@ -1,7 +1,4 @@
-# Global-Housing-Affordability-Modeling---Jennifer-Mac-1
-PDF Link: [Global Housing Affordability - Jennifer Mac.pdf](https://github.com/user-attachments/files/27936038/Global.Housing.Affordability.-.Jennifer.Mac.pdf)
-
-# 🏠 Global Housing Affordability Analysis
+# Global Housing Affordability Analysis
 
 A statistical analysis of rental affordability across 121 countries, exploring what economic indicators actually drive rent prices — and why the U.S. is pricing people out.
 
