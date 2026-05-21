@@ -1,6 +1,6 @@
 # 🌎🏠 Global Housing Affordability Analysis
 
-A statistical analysis of rental affordability across 121 countries, exploring what economic indicators actually drive rent prices — and why the U.S. is pricing people out.
+A statistical analysis of rental affordability across 121 countries, exploring what economic indicators actually drive rent prices.
 
 *Jennifer Mac — Department of Statistics and Data Science, CSU East Bay*
 
